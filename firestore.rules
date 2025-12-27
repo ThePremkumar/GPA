@@ -1,0 +1,106 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper function to get the user's admin profile
+    function getAdminProfile() {
+      return get(/databases/$(database)/documents/admins/$(request.auth.uid)).data;
+    }
+
+    function isSuperAdmin() {
+      return request.auth != null && getAdminProfile().role == 'super_admin';
+    }
+
+    function isBatchAdmin() {
+      let profile = getAdminProfile();
+      return request.auth != null && (profile.role == 'batch_admin' || profile.role == 'year_admin');
+    }
+
+    function isAdmin() {
+      return isSuperAdmin() || isBatchAdmin();
+    }
+
+    function getAssignedBatch() {
+      let profile = getAdminProfile();
+      return profile.assignedBatch != null ? profile.assignedBatch : profile.assignedYear;
+    }
+
+    // Config Collection (Regulations, etc.)
+    // Only Super Admins can write, anyone can read regulations
+    match /config/{docId} {
+      allow read: if true;
+      allow write: if isSuperAdmin();
+    }
+
+    // Admins Collection
+    // Super Admins: Full access
+    // Users: Can read their own profile
+    match /admins/{userId} {
+      allow read: if request.auth != null && (request.auth.uid == userId || isSuperAdmin());
+      allow create: if isSuperAdmin();
+      allow update: if request.auth != null && (request.auth.uid == userId || isSuperAdmin());
+      allow delete: if isSuperAdmin();
+    }
+
+    // Students Collection
+    match /students/{studentId} {
+      // Super Admin: Full Access
+      allow read, write: if isSuperAdmin();
+      
+      // Batch Admin: Read/Write students in their assigned batch only
+      allow read: if isBatchAdmin() && resource.data.batch == getAssignedBatch();
+      allow create: if isBatchAdmin() && request.resource.data.batch == getAssignedBatch();
+      allow update, delete: if isBatchAdmin() && resource.data.batch == getAssignedBatch();
+      
+      // Students: Can read their own profile
+      allow read: if request.auth != null && request.auth.uid == studentId;
+      allow update: if request.auth != null && request.auth.uid == studentId && 
+                      !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'batch', 'regulation']);
+    }
+
+    // Subjects Collection
+    match /subjects/{batchId} {
+      // Anyone can read subjects (needed for SGPA calculator)
+      allow read: if true;
+      
+      // Super Admin: Full write access
+      allow write: if isSuperAdmin();
+      
+      // Batch Admin: NO write access (Super Admin only for subjects)
+      // This is explicitly denied for batch admins as per requirements
+    }
+
+    // Activity Logs Collection
+    match /activity_logs/{logId} {
+      // Only Super Admins can read all logs
+      allow read: if isSuperAdmin();
+      
+      // Batch Admins can read their own activity
+      allow read: if isBatchAdmin() && resource.data.adminId == request.auth.uid;
+      
+      // Any admin can create logs
+      allow create: if isAdmin();
+      
+      // No updates or deletes (immutable audit trail)
+      allow update, delete: if false;
+    }
+
+    // Semesters Collection (if used)
+    match /semesters/{semesterId} {
+      allow read: if true;
+      allow write: if isSuperAdmin();
+    }
+
+    // Regulations Collection (if stored separately)
+    match /regulations/{regId} {
+      allow read: if true;
+      allow write: if isSuperAdmin();
+    }
+
+    // Batches Collection (if stored separately)
+    match /batches/{batchId} {
+      allow read: if true;
+      allow write: if isSuperAdmin();
+    }
+  }
+}
