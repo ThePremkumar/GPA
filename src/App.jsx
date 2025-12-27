@@ -6,6 +6,7 @@ import Login from './pages/Login';
 import Signup from './pages/Signup';
 import AdminSetup from './pages/AdminSetup';
 import Home from './pages/Home';
+import LandingPage from './pages/LandingPage';
 import About from './pages/About';
 import Contact from './pages/Contact';
 import Navbar from './components/Navbar';
@@ -20,10 +21,17 @@ import Dashboard from './pages/Dashboard'; // Legacy/Student dashboard
 const LoadingScreen = () => (
   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', background: 'var(--bg-primary)' }}>
     <div style={{ textAlign: 'center' }}>
-      <div style={{ width: '40px', height: '40px', border: '3px solid rgba(59,130,246,0.2)', borderTopColor: '#3b82f6', borderRadius: '50%', animation: 'spin 1s linear infinite', margin: '0 auto 16px' }} />
-      <p style={{ color: 'var(--text-secondary)' }}>Loading...</p>
+      <div style={{ 
+        width: '48px', 
+        height: '48px', 
+        border: '3px solid rgba(26, 115, 232, 0.2)', 
+        borderTopColor: 'var(--primary)', 
+        borderRadius: '50%', 
+        animation: 'spin 1s linear infinite', 
+        margin: '0 auto 16px' 
+      }} />
+      <p style={{ color: 'var(--text-secondary)', fontWeight: 'var(--font-medium)' }}>Loading...</p>
     </div>
-    <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
   </div>
 );
 
@@ -74,6 +82,7 @@ function App() {
           <Routes>
             {/* Public Views with Navbar */}
             <Route path="/" element={<><Navbar /><Home /></>} />
+            <Route path="/welcome" element={<><Navbar /><LandingPage /></>} />
             <Route path="/about" element={<><Navbar /><About /></>} />
             <Route path="/contact" element={<><Navbar /><Contact /></>} />
             

@@ -1,6 +1,6 @@
 /**
- * Super Admin Chat Inbox
- * View and respond to student messages + Start new conversations
+ * Batch Admin Chat Inbox
+ * View and respond to student messages in assigned batch + Start new conversations
  */
 
 import React, { useState, useEffect, useRef } from 'react';
@@ -17,19 +17,19 @@ import {
   Plus,
   X,
   Users,
-  GraduationCap,
-  Shield
+  GraduationCap
 } from 'lucide-react';
 import { 
   subscribeToUserChats, 
   subscribeToMessages, 
   sendMessage,
   markMessagesAsRead,
-  getAllMessageableUsers,
   initiateAdminChat
 } from '../../../services/chatService';
+import { rtdb } from '../../../firebase/config';
+import { ref, get } from 'firebase/database';
 
-export default function ChatInbox() {
+export default function BatchAdminChatInbox() {
   const { currentUser, userData } = useAuth();
   const [chats, setChats] = useState([]);
   const [selectedChat, setSelectedChat] = useState(null);
@@ -41,59 +41,87 @@ export default function ChatInbox() {
   
   // New Message Modal State
   const [showNewMessageModal, setShowNewMessageModal] = useState(false);
-  const [allUsers, setAllUsers] = useState([]);
-  const [loadingUsers, setLoadingUsers] = useState(false);
-  const [userSearchTerm, setUserSearchTerm] = useState('');
-  const [selectedUser, setSelectedUser] = useState(null);
+  const [batchStudents, setBatchStudents] = useState([]);
+  const [loadingStudents, setLoadingStudents] = useState(false);
+  const [studentSearchTerm, setStudentSearchTerm] = useState('');
+  const [selectedStudent, setSelectedStudent] = useState(null);
   const [initialMessage, setInitialMessage] = useState('');
   const [sendingNewChat, setSendingNewChat] = useState(false);
   
-  const adminId = 'admin';
+  const batchAdminId = currentUser?.uid;
+  const assignedBatch = userData?.assignedBatch || userData?.assignedYear;
   
-  // Subscribe to chats list
+  // Subscribe to chats list for this batch admin
   useEffect(() => {
-    const unsubscribe = subscribeToUserChats(adminId, (chatsList) => {
+    if (!batchAdminId) return;
+    
+    const unsubscribe = subscribeToUserChats(batchAdminId, (chatsList) => {
       setChats(chatsList);
     });
     
     return () => unsubscribe();
-  }, []);
+  }, [batchAdminId]);
   
   // Subscribe to selected chat messages
   useEffect(() => {
-    if (!selectedChat) return;
+    if (!selectedChat || !batchAdminId) return;
     
-    const unsubscribe = subscribeToMessages(adminId, selectedChat.recipientId, (msgs) => {
+    const unsubscribe = subscribeToMessages(batchAdminId, selectedChat.recipientId, (msgs) => {
       setMessages(msgs);
     });
     
     // Mark messages as read
-    markMessagesAsRead(adminId, selectedChat.chatId);
+    markMessagesAsRead(batchAdminId, selectedChat.chatId);
     
     return () => unsubscribe();
-  }, [selectedChat]);
+  }, [selectedChat, batchAdminId]);
   
   // Scroll to bottom on new messages
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
   
-  // Load all users when modal opens
+  // Load students from assigned batch when modal opens
   useEffect(() => {
-    if (showNewMessageModal && allUsers.length === 0) {
-      loadUsers();
+    if (showNewMessageModal && batchStudents.length === 0) {
+      loadBatchStudents();
     }
   }, [showNewMessageModal]);
   
-  async function loadUsers() {
-    setLoadingUsers(true);
+  async function loadBatchStudents() {
+    if (!assignedBatch) return;
+    
+    setLoadingStudents(true);
     try {
-      const users = await getAllMessageableUsers();
-      setAllUsers(users);
+      const studentsRef = ref(rtdb, 'students');
+      const snapshot = await get(studentsRef);
+      
+      if (snapshot.exists()) {
+        const students = [];
+        Object.entries(snapshot.val()).forEach(([id, student]) => {
+          // Filter only students from assigned batch
+          if (student.batch === assignedBatch) {
+            students.push({
+              id,
+              uid: student.uid || id,
+              name: student.fullName || student.name || 'Unknown',
+              email: student.email || student.authEmail,
+              role: 'student',
+              batch: student.batch,
+              regulation: student.regulation,
+              regNum: student.registerNumber || student.regNum
+            });
+          }
+        });
+        
+        // Sort by name
+        students.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+        setBatchStudents(students);
+      }
     } catch (error) {
-      console.error('Failed to load users:', error);
+      console.error('Failed to load batch students:', error);
     } finally {
-      setLoadingUsers(false);
+      setLoadingStudents(false);
     }
   }
   
@@ -104,10 +132,10 @@ export default function ChatInbox() {
     setSending(true);
     try {
       await sendMessage({
-        senderId: adminId,
-        senderName: userData?.fullName || 'Admin',
-        senderEmail: userData?.email || 'admin@cgpa.app',
-        senderRole: 'super_admin',
+        senderId: batchAdminId,
+        senderName: userData?.fullName || 'Batch Admin',
+        senderEmail: userData?.email || currentUser.email,
+        senderRole: 'batch_admin',
         receiverId: selectedChat.recipientId,
         message: newMessage.trim()
       });
@@ -121,25 +149,25 @@ export default function ChatInbox() {
   
   async function handleStartNewChat(e) {
     e.preventDefault();
-    if (!selectedUser || !initialMessage.trim()) return;
+    if (!selectedStudent || !initialMessage.trim()) return;
     
     setSendingNewChat(true);
     try {
       const result = await initiateAdminChat({
-        recipientId: selectedUser.uid || selectedUser.id,
-        recipientName: selectedUser.name,
-        recipientEmail: selectedUser.email,
-        recipientRole: selectedUser.role,
-        adminId: adminId,
-        adminName: userData?.fullName || 'Admin Support',
+        recipientId: selectedStudent.uid || selectedStudent.id,
+        recipientName: selectedStudent.name,
+        recipientEmail: selectedStudent.email,
+        recipientRole: 'student',
+        adminId: batchAdminId,
+        adminName: userData?.fullName || 'Batch Admin',
         message: initialMessage.trim()
       });
       
       // Close modal and select the new chat
       setShowNewMessageModal(false);
-      setSelectedUser(null);
+      setSelectedStudent(null);
       setInitialMessage('');
-      setUserSearchTerm('');
+      setStudentSearchTerm('');
       
       // Set the new chat as selected
       if (result.chat) {
@@ -180,13 +208,12 @@ export default function ChatInbox() {
     chat.recipientEmail?.toLowerCase().includes(searchTerm.toLowerCase())
   );
   
-  const filteredUsers = allUsers.filter(user => {
-    const searchLower = userSearchTerm.toLowerCase();
+  const filteredStudents = batchStudents.filter(student => {
+    const searchLower = studentSearchTerm.toLowerCase();
     return (
-      user.name?.toLowerCase().includes(searchLower) ||
-      user.email?.toLowerCase().includes(searchLower) ||
-      user.regNum?.toLowerCase().includes(searchLower) ||
-      user.batch?.toLowerCase().includes(searchLower)
+      student.name?.toLowerCase().includes(searchLower) ||
+      student.email?.toLowerCase().includes(searchLower) ||
+      student.regNum?.toLowerCase().includes(searchLower)
     );
   });
   
@@ -198,7 +225,7 @@ export default function ChatInbox() {
       <div className="inbox-header">
         <div>
           <h1>Messages</h1>
-          <p>{chats.length} conversations • {totalUnread} unread</p>
+          <p>{chats.length} conversations • {totalUnread} unread • Batch {assignedBatch}</p>
         </div>
         <button 
           className="new-message-btn"
@@ -229,7 +256,7 @@ export default function ChatInbox() {
               <div className="no-chats">
                 <MessageCircle size={48} />
                 <h3>No messages yet</h3>
-                <p>Click "New Message" to start a conversation</p>
+                <p>Click "New Message" to start a conversation with students in your batch</p>
               </div>
             ) : (
               filteredChats.map((chat) => (
@@ -289,13 +316,13 @@ export default function ChatInbox() {
                   messages.map((msg) => (
                     <div 
                       key={msg.id} 
-                      className={`message ${msg.senderId === adminId ? 'sent' : 'received'}`}
+                      className={`message ${msg.senderId === batchAdminId ? 'sent' : 'received'}`}
                     >
                       <div className="message-bubble">
                         <p>{msg.message}</p>
                         <div className="message-meta">
                           <span>{formatMessageTime(msg.timestamp)}</span>
-                          {msg.senderId === adminId && (
+                          {msg.senderId === batchAdminId && (
                             <CheckCheck size={14} className={msg.read ? 'read' : ''} />
                           )}
                         </div>
@@ -335,62 +362,57 @@ export default function ChatInbox() {
         <div className="modal-overlay" onClick={() => setShowNewMessageModal(false)}>
           <div className="new-message-modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h2>New Message</h2>
+              <h2>Message Student</h2>
               <button className="close-btn" onClick={() => setShowNewMessageModal(false)}>
                 <X size={20} />
               </button>
             </div>
             
-            {!selectedUser ? (
+            {!selectedStudent ? (
               <>
-                {/* User Search */}
+                {/* Student Search */}
                 <div className="modal-search">
                   <Search size={18} />
                   <input
                     type="text"
-                    placeholder="Search by name, email, register number, or batch..."
-                    value={userSearchTerm}
-                    onChange={(e) => setUserSearchTerm(e.target.value)}
+                    placeholder="Search students by name, email, or register number..."
+                    value={studentSearchTerm}
+                    onChange={(e) => setStudentSearchTerm(e.target.value)}
                     autoFocus
                   />
                 </div>
                 
-                {/* User List */}
+                {/* Student List */}
                 <div className="users-list">
-                  {loadingUsers ? (
+                  {loadingStudents ? (
                     <div className="loading-users">
                       <div className="spinner" />
-                      <p>Loading users...</p>
+                      <p>Loading students from Batch {assignedBatch}...</p>
                     </div>
-                  ) : filteredUsers.length === 0 ? (
+                  ) : filteredStudents.length === 0 ? (
                     <div className="no-users">
                       <Users size={40} />
-                      <p>{userSearchTerm ? 'No users found' : 'No users available'}</p>
+                      <p>{studentSearchTerm ? 'No students found' : `No students in Batch ${assignedBatch}`}</p>
                     </div>
                   ) : (
-                    filteredUsers.map((user) => (
+                    filteredStudents.map((student) => (
                       <div
-                        key={user.id}
+                        key={student.id}
                         className="user-item"
-                        onClick={() => setSelectedUser(user)}
+                        onClick={() => setSelectedStudent(student)}
                       >
                         <div className="user-avatar">
-                          {user.role === 'student' ? (
-                            <GraduationCap size={18} />
-                          ) : (
-                            <Shield size={18} />
-                          )}
+                          <GraduationCap size={18} />
                         </div>
                         <div className="user-info">
-                          <div className="user-name">{user.name}</div>
+                          <div className="user-name">{student.name}</div>
                           <div className="user-details">
-                            {user.email}
-                            {user.regNum && <span> • {user.regNum}</span>}
-                            {user.batch && <span> • Batch {user.batch}</span>}
+                            {student.email}
+                            {student.regNum && <span> • {student.regNum}</span>}
                           </div>
                         </div>
-                        <div className={`user-role ${user.role}`}>
-                          {user.role === 'student' ? 'Student' : `Batch Admin${user.batch ? ` • ${user.batch}` : ''}`}
+                        <div className="user-role student">
+                          Student
                         </div>
                       </div>
                     ))
@@ -399,18 +421,18 @@ export default function ChatInbox() {
               </>
             ) : (
               <>
-                {/* Selected User */}
+                {/* Selected Student */}
                 <div className="selected-user-card">
-                  <button className="back-btn-small" onClick={() => setSelectedUser(null)}>
+                  <button className="back-btn-small" onClick={() => setSelectedStudent(null)}>
                     <ArrowLeft size={16} />
                   </button>
                   <div className="selected-user-info">
                     <div className="selected-user-avatar">
-                      {selectedUser.name?.charAt(0).toUpperCase() || 'U'}
+                      {selectedStudent.name?.charAt(0).toUpperCase() || 'S'}
                     </div>
                     <div>
-                      <div className="selected-user-name">{selectedUser.name}</div>
-                      <div className="selected-user-email">{selectedUser.email}</div>
+                      <div className="selected-user-name">{selectedStudent.name}</div>
+                      <div className="selected-user-email">{selectedStudent.email}</div>
                     </div>
                   </div>
                 </div>
@@ -476,7 +498,7 @@ export default function ChatInbox() {
           display: flex;
           align-items: center;
           gap: 8px;
-          background: linear-gradient(135deg, var(--primary), var(--accent-cyan));
+          background: linear-gradient(135deg, #3b82f6, #8b5cf6);
           color: white;
           border: none;
           padding: 12px 20px;
@@ -488,7 +510,7 @@ export default function ChatInbox() {
         
         .new-message-btn:hover {
           transform: translateY(-2px);
-          box-shadow: 0 8px 20px rgba(26, 115, 232, 0.3);
+          box-shadow: 0 8px 20px rgba(59, 130, 246, 0.3);
         }
         
         .inbox-container {
@@ -560,18 +582,18 @@ export default function ChatInbox() {
         }
         
         .chat-item.active {
-          background: rgba(26, 115, 232, 0.1);
-          border-left: 3px solid var(--primary);
+          background: rgba(59, 130, 246, 0.1);
+          border-left: 3px solid #3b82f6;
         }
         
         .chat-item.unread {
-          background: rgba(26, 115, 232, 0.05);
+          background: rgba(59, 130, 246, 0.05);
         }
         
         .chat-item-avatar {
           width: 44px;
           height: 44px;
-          background: linear-gradient(135deg, var(--primary), var(--accent-purple));
+          background: linear-gradient(135deg, #3b82f6, #8b5cf6);
           border-radius: 50%;
           display: flex;
           align-items: center;
@@ -621,7 +643,7 @@ export default function ChatInbox() {
         }
         
         .unread-badge {
-          background: var(--primary);
+          background: #3b82f6;
           color: white;
           font-size: 11px;
           font-weight: 600;
@@ -681,7 +703,7 @@ export default function ChatInbox() {
         .chat-window-avatar {
           width: 40px;
           height: 40px;
-          background: linear-gradient(135deg, var(--primary), var(--accent-purple));
+          background: linear-gradient(135deg, #3b82f6, #8b5cf6);
           border-radius: 50%;
           display: flex;
           align-items: center;
@@ -736,7 +758,7 @@ export default function ChatInbox() {
         }
         
         .message.sent .message-bubble {
-          background: linear-gradient(135deg, var(--primary), var(--accent-cyan));
+          background: linear-gradient(135deg, #3b82f6, #8b5cf6);
           color: white;
           border-bottom-right-radius: 4px;
         }
@@ -794,13 +816,13 @@ export default function ChatInbox() {
         }
         
         .chat-window-input input:focus {
-          border-color: var(--primary);
+          border-color: #3b82f6;
         }
         
         .chat-window-input button {
           width: 44px;
           height: 44px;
-          background: linear-gradient(135deg, var(--primary), var(--accent-cyan));
+          background: linear-gradient(135deg, #3b82f6, #8b5cf6);
           border: none;
           border-radius: 50%;
           color: white;
@@ -916,8 +938,8 @@ export default function ChatInbox() {
         .spinner {
           width: 32px;
           height: 32px;
-          border: 3px solid rgba(26, 115, 232, 0.2);
-          border-top-color: var(--primary);
+          border: 3px solid rgba(59, 130, 246, 0.2);
+          border-top-color: #3b82f6;
           border-radius: 50%;
           animation: spin 1s linear infinite;
         }
@@ -946,18 +968,18 @@ export default function ChatInbox() {
         }
         
         .user-item:hover {
-          background: rgba(26, 115, 232, 0.1);
+          background: rgba(59, 130, 246, 0.1);
         }
         
         .user-avatar {
           width: 40px;
           height: 40px;
-          background: rgba(26, 115, 232, 0.15);
+          background: rgba(59, 130, 246, 0.15);
           border-radius: 50%;
           display: flex;
           align-items: center;
           justify-content: center;
-          color: var(--primary);
+          color: #3b82f6;
         }
         
         .user-info {
@@ -988,12 +1010,7 @@ export default function ChatInbox() {
         
         .user-role.student {
           background: rgba(16, 185, 129, 0.15);
-          color: var(--success);
-        }
-        
-        .user-role.batch_admin, .user-role.year_admin {
-          background: rgba(139, 92, 246, 0.15);
-          color: var(--accent-purple);
+          color: #10b981;
         }
         
         .selected-user-card {
@@ -1002,7 +1019,7 @@ export default function ChatInbox() {
           gap: 12px;
           padding: 16px 24px;
           border-bottom: 1px solid rgba(255,255,255,0.05);
-          background: rgba(26, 115, 232, 0.05);
+          background: rgba(59, 130, 246, 0.05);
         }
         
         .back-btn-small {
@@ -1027,7 +1044,7 @@ export default function ChatInbox() {
         .selected-user-avatar {
           width: 44px;
           height: 44px;
-          background: linear-gradient(135deg, var(--primary), var(--accent-cyan));
+          background: linear-gradient(135deg, #3b82f6, #8b5cf6);
           border-radius: 50%;
           display: flex;
           align-items: center;
@@ -1068,7 +1085,7 @@ export default function ChatInbox() {
         }
         
         .compose-form textarea:focus {
-          border-color: var(--primary);
+          border-color: #3b82f6;
         }
         
         .send-btn {
@@ -1076,7 +1093,7 @@ export default function ChatInbox() {
           align-items: center;
           justify-content: center;
           gap: 8px;
-          background: linear-gradient(135deg, var(--primary), var(--accent-cyan));
+          background: linear-gradient(135deg, #3b82f6, #8b5cf6);
           color: white;
           border: none;
           padding: 14px 24px;
@@ -1089,7 +1106,7 @@ export default function ChatInbox() {
         
         .send-btn:hover:not(:disabled) {
           transform: translateY(-2px);
-          box-shadow: 0 8px 20px rgba(26, 115, 232, 0.3);
+          box-shadow: 0 8px 20px rgba(59, 130, 246, 0.3);
         }
         
         .send-btn:disabled {

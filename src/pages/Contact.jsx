@@ -37,7 +37,7 @@ export default function Contact() {
               </div>
               <div>
                 <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Call Support</div>
-                <div style={{ fontWeight: '500' }}>+91 12345 67890</div>
+                <div style={{ fontWeight: '500' }}>+91 6369540320</div>
               </div>
             </div>
 

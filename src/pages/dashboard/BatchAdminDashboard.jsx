@@ -7,12 +7,13 @@ import React, { useState } from 'react';
 import { Routes, Route, Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../contexts/ToastContext';
-import { LayoutDashboard, GraduationCap, BookOpen, LogOut, UserCheck, Menu, X } from 'lucide-react';
+import { LayoutDashboard, GraduationCap, BookOpen, LogOut, UserCheck, Menu, X, MessageCircle } from 'lucide-react';
 
 // Components
 import BatchAdminOverview from './batch-admin/Overview';
 import BatchStudentManagement from './batch-admin/StudentManagement';
 import BatchSubjectManagement from './batch-admin/SubjectManagement';
+import BatchAdminChatInbox from './batch-admin/ChatInbox';
 
 export default function BatchAdminDashboard() {
   const { logout, userData } = useAuth();
@@ -43,6 +44,7 @@ export default function BatchAdminDashboard() {
     { path: '/dashboard', icon: LayoutDashboard, label: 'Overview' },
     { path: '/dashboard/students', icon: GraduationCap, label: 'Manage Students' },
     { path: '/dashboard/subjects', icon: BookOpen, label: 'Manage Subjects' },
+    { path: '/dashboard/messages', icon: MessageCircle, label: 'Messages' },
   ];
 
   return (
@@ -138,6 +140,7 @@ export default function BatchAdminDashboard() {
             <Route path="/" element={<BatchAdminOverview />} />
             <Route path="/students" element={<BatchStudentManagement />} />
             <Route path="/subjects" element={<BatchSubjectManagement />} />
+            <Route path="/messages" element={<BatchAdminChatInbox />} />
           </Routes>
         </div>
       </main>

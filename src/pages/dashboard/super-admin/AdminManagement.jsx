@@ -33,8 +33,10 @@ import {
   getAllAdmins, 
   deleteAdmin, 
   updateAdminPassword,
+  sendAdminPasswordReset,
   updateAdminRole,
-  updateAdminBatch 
+  updateAdminBatch,
+  updateAdmin
 } from '../../../services/adminService';
 import { generateSecurePassword } from '../../../utils/encryption';
 import { ROLES } from '../../../utils/constants';
@@ -69,6 +71,8 @@ export default function AdminManagement() {
   const [generatedPassword, setGeneratedPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [passwordMode, setPasswordMode] = useState('auto'); // 'auto' or 'manual'
+  const [manualPassword, setManualPassword] = useState('');
   
   const { regulations, regulationYears, allBatches, getBatches } = useRegulations();
 
@@ -101,6 +105,9 @@ export default function AdminManagement() {
     });
     const password = generateSecurePassword(12);
     setGeneratedPassword(password);
+    setPasswordMode('auto');
+    setManualPassword('');
+    setShowPassword(false);
     setShowAddModal(true);
   }
 
@@ -109,9 +116,17 @@ export default function AdminManagement() {
     setSubmitting(true);
 
     try {
+      const finalPassword = passwordMode === 'manual' ? manualPassword : generatedPassword;
+      
+      if (passwordMode === 'manual' && manualPassword.length < 6) {
+        addToast('Password must be at least 6 characters', 'error');
+        setSubmitting(false);
+        return;
+      }
+      
       await createAdmin({
         ...formData,
-        password: generatedPassword,
+        password: finalPassword,
         currentAdmin: {
           uid: currentUser.uid,
           fullName: userData?.fullName,
@@ -134,6 +149,9 @@ export default function AdminManagement() {
     setSelectedAdmin(admin);
     const newPassword = generateSecurePassword(12);
     setGeneratedPassword(newPassword);
+    setPasswordMode('auto');
+    setManualPassword('');
+    setShowPassword(false);
     setShowPasswordModal(true);
   }
 
@@ -142,9 +160,10 @@ export default function AdminManagement() {
     setSubmitting(true);
 
     try {
-      await updateAdminPassword(
-        selectedAdmin.id, 
-        generatedPassword,
+      // Send password reset email - this is the proper way to change passwords
+      // Firebase Auth doesn't allow changing another user's password from client-side
+      await sendAdminPasswordReset(
+        selectedAdmin.email,
         {
           uid: currentUser.uid,
           fullName: userData?.fullName,
@@ -152,12 +171,12 @@ export default function AdminManagement() {
         }
       );
       
-      addToast('Password updated successfully!', 'success');
+      addToast(`Password reset email sent to ${selectedAdmin.email}!`, 'success');
       setShowPasswordModal(false);
       setSelectedAdmin(null);
     } catch (error) {
-      console.error('Error updating password:', error);
-      addToast('Failed to update password', 'error');
+      console.error('Error sending password reset:', error);
+      addToast('Failed to send password reset email', 'error');
     } finally {
       setSubmitting(false);
     }
@@ -172,7 +191,8 @@ export default function AdminManagement() {
       dateOfBirth: '',
       role: admin.role || ROLES.BATCH_ADMIN,
       assignedBatch: admin.assignedBatch || admin.assignedYear || '',
-      assignedRegulation: admin.assignedRegulation || ''
+      assignedRegulation: admin.assignedRegulation || '',
+      status: admin.status || 'active'
     });
     setShowEditModal(true);
   }
@@ -183,24 +203,21 @@ export default function AdminManagement() {
     setSubmitting(true);
 
     try {
-      // Update role if changed
-      if (formData.role !== selectedAdmin.role) {
-        await updateAdminRole(
-          selectedAdmin.id,
-          formData.role,
-          { uid: currentUser.uid, fullName: userData?.fullName, email: userData?.email }
-        );
-      }
-      
-      // Update batch if changed
-      if (formData.assignedBatch !== (selectedAdmin.assignedBatch || selectedAdmin.assignedYear)) {
-        await updateAdminBatch(
-          selectedAdmin.id,
-          formData.assignedBatch,
-          formData.assignedRegulation,
-          { uid: currentUser.uid, fullName: userData?.fullName, email: userData?.email }
-        );
-      }
+      // Update all admin fields
+      await updateAdmin(
+        selectedAdmin.id,
+        {
+          fullName: formData.fullName,
+          email: formData.email,
+          registerNumber: formData.registerNumber,
+          role: formData.role,
+          assignedRegulation: formData.assignedRegulation,
+          assignedBatch: formData.assignedBatch,
+          assignedYear: formData.assignedBatch, // Backwards compatibility
+          status: formData.status || 'active'
+        },
+        { uid: currentUser.uid, fullName: userData?.fullName, email: userData?.email }
+      );
       
       addToast('Admin updated successfully!', 'success');
       setShowEditModal(false);
@@ -479,28 +496,71 @@ export default function AdminManagement() {
                   </div>
                 </div>
 
-                {/* Generated Password */}
+                {/* Password Section */}
                 <div className="password-section">
-                  <label>Generated Password</label>
-                  <div className="password-display">
-                    <input
-                      type={showPassword ? 'text' : 'password'}
-                      value={generatedPassword}
-                      readOnly
-                    />
-                    <button type="button" onClick={() => setShowPassword(!showPassword)}>
-                      {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-                    </button>
-                    <button 
-                      type="button" 
-                      onClick={() => {
-                        navigator.clipboard.writeText(generatedPassword);
-                        addToast('Password copied!', 'success');
-                      }}
-                    >
-                      Copy
-                    </button>
+                  <div className="password-mode-toggle">
+                    <label>Password</label>
+                    <div className="toggle-buttons">
+                      <button 
+                        type="button" 
+                        className={passwordMode === 'auto' ? 'active' : ''}
+                        onClick={() => setPasswordMode('auto')}
+                      >
+                        Auto Generate
+                      </button>
+                      <button 
+                        type="button" 
+                        className={passwordMode === 'manual' ? 'active' : ''}
+                        onClick={() => setPasswordMode('manual')}
+                      >
+                        Manual
+                      </button>
+                    </div>
                   </div>
+                  
+                  {passwordMode === 'auto' ? (
+                    <div className="password-display">
+                      <input
+                        type={showPassword ? 'text' : 'password'}
+                        value={generatedPassword}
+                        readOnly
+                      />
+                      <button type="button" onClick={() => setShowPassword(!showPassword)}>
+                        {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                      </button>
+                      <button 
+                        type="button" 
+                        onClick={() => {
+                          setGeneratedPassword(generateSecurePassword(12));
+                          addToast('New password generated', 'success');
+                        }}
+                      >
+                        Regenerate
+                      </button>
+                      <button 
+                        type="button" 
+                        onClick={() => {
+                          navigator.clipboard.writeText(generatedPassword);
+                          addToast('Password copied!', 'success');
+                        }}
+                      >
+                        Copy
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="password-display manual">
+                      <input
+                        type={showPassword ? 'text' : 'password'}
+                        value={manualPassword}
+                        onChange={(e) => setManualPassword(e.target.value)}
+                        placeholder="Enter password (min 6 characters)"
+                        minLength={6}
+                      />
+                      <button type="button" onClick={() => setShowPassword(!showPassword)}>
+                        {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                      </button>
+                    </div>
+                  )}
                   <p className="password-note">
                     ⚠️ Save this password! The admin will need it to login.
                   </p>
@@ -519,41 +579,32 @@ export default function AdminManagement() {
         </div>
       )}
 
-      {/* Change Password Modal */}
+      {/* Change Password Modal - Email Reset */}
       {showPasswordModal && (
         <div className="modal-overlay" onClick={() => setShowPasswordModal(false)}>
           <div className="modal small" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h2>Change Password</h2>
+              <h2>Reset Password</h2>
               <button className="close-btn" onClick={() => setShowPasswordModal(false)}>
                 <X size={20} />
               </button>
             </div>
             <div className="modal-body">
-              <p style={{ marginBottom: '16px', color: 'var(--text-secondary)' }}>
-                Generate a new password for {selectedAdmin?.fullName || selectedAdmin?.email}
-              </p>
-              <div className="password-section">
-                <label>New Password</label>
-                <div className="password-display">
-                  <input
-                    type={showPassword ? 'text' : 'password'}
-                    value={generatedPassword}
-                    readOnly
-                  />
-                  <button type="button" onClick={() => setShowPassword(!showPassword)}>
-                    {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-                  </button>
-                  <button 
-                    type="button" 
-                    onClick={() => {
-                      setGeneratedPassword(generateSecurePassword(12));
-                      addToast('New password generated', 'success');
-                    }}
-                  >
-                    Regenerate
-                  </button>
+              <div className="email-reset-info">
+                <div className="info-icon">
+                  <Mail size={32} />
                 </div>
+                <h3>Send Password Reset Email</h3>
+                <p>
+                  A password reset link will be sent to:
+                </p>
+                <div className="target-email">
+                  {selectedAdmin?.email}
+                </div>
+                <p className="info-note">
+                  The admin will receive an email with instructions to set a new password.
+                  This is the secure way to change passwords in Firebase.
+                </p>
               </div>
             </div>
             <div className="modal-footer">
@@ -561,7 +612,7 @@ export default function AdminManagement() {
                 Cancel
               </button>
               <button className="btn-primary" onClick={handleChangePassword} disabled={submitting}>
-                {submitting ? 'Updating...' : 'Update Password'}
+                {submitting ? 'Sending...' : 'Send Reset Email'}
               </button>
             </div>
           </div>
@@ -573,7 +624,7 @@ export default function AdminManagement() {
         <div className="modal-overlay" onClick={() => setShowEditModal(false)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h2>Edit Admin</h2>
+              <h2>Edit Admin Details</h2>
               <button className="close-btn" onClick={() => setShowEditModal(false)}>
                 <X size={20} />
               </button>
@@ -581,6 +632,45 @@ export default function AdminManagement() {
             <form onSubmit={handleUpdateAdmin}>
               <div className="modal-body">
                 <div className="form-grid">
+                  {/* Full Name */}
+                  <div className="form-group">
+                    <label>Full Name</label>
+                    <input
+                      type="text"
+                      className="input-field"
+                      value={formData.fullName}
+                      onChange={(e) => setFormData({...formData, fullName: e.target.value})}
+                      required
+                    />
+                  </div>
+                  
+                  {/* Email */}
+                  <div className="form-group">
+                    <label>Email Address <span className="field-note">(display only)</span></label>
+                    <input
+                      type="email"
+                      className="input-field"
+                      value={formData.email}
+                      onChange={(e) => setFormData({...formData, email: e.target.value})}
+                      required
+                    />
+                    <small className="field-hint">
+                      ℹ️ Changing email here updates contact info only. Login email remains unchanged.
+                    </small>
+                  </div>
+                  
+                  {/* Register Number */}
+                  <div className="form-group">
+                    <label>Register Number</label>
+                    <input
+                      type="text"
+                      className="input-field"
+                      value={formData.registerNumber}
+                      onChange={(e) => setFormData({...formData, registerNumber: e.target.value})}
+                    />
+                  </div>
+                  
+                  {/* Role */}
                   <div className="form-group">
                     <label>Role</label>
                     <select
@@ -593,6 +683,28 @@ export default function AdminManagement() {
                       <option value={ROLES.SUPER_ADMIN}>Super Admin</option>
                     </select>
                   </div>
+                  
+                  {/* Regulation */}
+                  <div className="form-group">
+                    <label>Assigned Regulation</label>
+                    <select
+                      className="input-field"
+                      value={formData.assignedRegulation}
+                      onChange={(e) => setFormData({
+                        ...formData, 
+                        assignedRegulation: e.target.value,
+                        assignedBatch: '' // Reset batch when regulation changes
+                      })}
+                      disabled={formData.role === ROLES.SUPER_ADMIN}
+                    >
+                      <option value="">Select Regulation</option>
+                      {regulationYears.map(reg => (
+                        <option key={reg} value={reg}>Regulation {reg}</option>
+                      ))}
+                    </select>
+                  </div>
+                  
+                  {/* Assigned Batch */}
                   <div className="form-group">
                     <label>Assigned Batch</label>
                     <select
@@ -602,9 +714,23 @@ export default function AdminManagement() {
                       disabled={formData.role === ROLES.SUPER_ADMIN}
                     >
                       <option value="">Select Batch</option>
-                      {allBatches.map(batch => (
+                      {availableBatches.map(batch => (
                         <option key={batch} value={batch}>{batch}</option>
                       ))}
+                    </select>
+                  </div>
+                  
+                  {/* Status */}
+                  <div className="form-group full-width">
+                    <label>Status</label>
+                    <select
+                      className="input-field"
+                      value={formData.status || 'active'}
+                      onChange={(e) => setFormData({...formData, status: e.target.value})}
+                    >
+                      <option value="active">Active</option>
+                      <option value="inactive">Inactive</option>
+                      <option value="suspended">Suspended</option>
                     </select>
                   </div>
                 </div>
@@ -959,6 +1085,46 @@ export default function AdminManagement() {
           color: var(--text-primary);
         }
 
+        .password-display.manual input {
+          font-family: inherit;
+        }
+
+        .password-mode-toggle {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-bottom: 12px;
+        }
+
+        .toggle-buttons {
+          display: flex;
+          gap: 4px;
+          background: rgba(255,255,255,0.05);
+          padding: 4px;
+          border-radius: 8px;
+        }
+
+        .toggle-buttons button {
+          padding: 8px 14px;
+          background: transparent;
+          border: none;
+          border-radius: 6px;
+          color: var(--text-secondary);
+          font-size: 13px;
+          font-weight: 500;
+          cursor: pointer;
+          transition: all 0.2s;
+        }
+
+        .toggle-buttons button:hover {
+          color: var(--text-primary);
+        }
+
+        .toggle-buttons button.active {
+          background: var(--primary);
+          color: white;
+        }
+
         .password-note {
           margin-top: 12px;
           font-size: 12px;
@@ -986,6 +1152,66 @@ export default function AdminManagement() {
 
         .btn-secondary:hover {
           background: rgba(255,255,255,0.1);
+        }
+
+        .email-reset-info {
+          text-align: center;
+          padding: 20px 0;
+        }
+
+        .email-reset-info .info-icon {
+          width: 64px;
+          height: 64px;
+          background: linear-gradient(135deg, var(--primary), var(--accent-cyan));
+          border-radius: 50%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          margin: 0 auto 16px;
+          color: white;
+        }
+
+        .email-reset-info h3 {
+          margin: 0 0 12px;
+          font-size: 18px;
+        }
+
+        .email-reset-info p {
+          color: var(--text-secondary);
+          margin: 0 0 8px;
+          font-size: 14px;
+        }
+
+        .email-reset-info .target-email {
+          background: rgba(26, 115, 232, 0.1);
+          border: 1px solid rgba(26, 115, 232, 0.3);
+          border-radius: 8px;
+          padding: 12px 16px;
+          font-family: monospace;
+          font-size: 14px;
+          color: var(--primary);
+          margin: 12px 0;
+        }
+
+        .email-reset-info .info-note {
+          font-size: 12px;
+          color: var(--text-muted);
+          margin-top: 12px;
+          line-height: 1.5;
+        }
+
+        .field-note {
+          font-size: 11px;
+          color: var(--text-muted);
+          font-weight: 400;
+        }
+
+        .field-hint {
+          display: block;
+          margin-top: 6px;
+          font-size: 12px;
+          color: var(--text-secondary);
+          line-height: 1.4;
         }
       `}</style>
     </div>

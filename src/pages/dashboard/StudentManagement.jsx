@@ -141,6 +141,7 @@ export default function StudentManagement() {
     setEditData({
       name: student.name || '',
       email: student.email || '',
+      dob: student.dob || '',
       regulation: student.regulation || '2021',
       batch: student.batch || '',
       status: student.status || 'active'
@@ -340,7 +341,14 @@ export default function StudentManagement() {
                     {/* Editable Email */}
                     <td style={{ padding: '16px' }}>
                       {editingId === student.id ? (
-                        <input className="input-field" type="email" value={editData.email} onChange={e => setEditData({...editData, email: e.target.value})} style={{ padding: '8px 12px', fontSize: '14px', width: '100%', minWidth: '180px' }} />
+                        <input 
+                          className="input-field" 
+                          type="email" 
+                          value={editData.email} 
+                          onChange={e => setEditData({...editData, email: e.target.value})} 
+                          style={{ padding: '8px 12px', fontSize: '14px', width: '100%', minWidth: '180px' }}
+                          title="This updates contact email only. Login email remains unchanged."
+                        />
                       ) : (
                         <span style={{ color: 'var(--text-secondary)' }}>{student.email}</span>
                       )}

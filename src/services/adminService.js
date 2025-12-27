@@ -5,7 +5,7 @@
 
 import { rtdb, auth } from '../firebase/config';
 import { ref, get, set, update, remove, push } from 'firebase/database';
-import { createUserWithEmailAndPassword } from 'firebase/auth';
+import { createUserWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/auth';
 
 /**
  * Create a new admin account
@@ -67,7 +67,34 @@ export async function createAdmin({
 }
 
 /**
- * Update admin password
+ * Send password reset email to admin
+ * This is the proper way to reset passwords as Firebase Auth 
+ * requires Admin SDK (Cloud Functions) to change another user's password
+ */
+export async function sendAdminPasswordReset(adminEmail, currentAdmin) {
+  try {
+    await sendPasswordResetEmail(auth, adminEmail);
+    
+    // Log activity
+    await logActivityRTDB({
+      type: 'PASSWORD_RESET_SENT',
+      adminId: currentAdmin?.uid,
+      adminName: currentAdmin?.fullName || currentAdmin?.email,
+      targetEmail: adminEmail,
+      details: { method: 'email_reset' }
+    });
+
+    return { success: true, method: 'email' };
+  } catch (error) {
+    console.error('Error sending password reset:', error);
+    throw error;
+  }
+}
+
+/**
+ * Update admin password metadata (for tracking purposes)
+ * Note: This does NOT change the Firebase Auth password.
+ * Use sendAdminPasswordReset() or Firebase Console for actual password changes.
  */
 export async function updateAdminPassword(adminId, newPassword, currentAdmin) {
   try {
@@ -335,6 +362,7 @@ function formatDateForDisplay(dateString) {
 export default {
   createAdmin,
   updateAdminPassword,
+  sendAdminPasswordReset,
   getAllAdmins,
   getAdminById,
   getAdminsByBatch,

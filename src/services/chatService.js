@@ -168,3 +168,136 @@ export function subscribeToUnreadCount(userId, callback) {
     callback(totalUnread);
   });
 }
+
+/**
+ * Get all users that admin can message (students + batch admins)
+ */
+export async function getAllMessageableUsers() {
+  try {
+    const users = [];
+    
+    // Get all students
+    const studentsSnap = await get(ref(rtdb, 'students'));
+    if (studentsSnap.exists()) {
+      Object.entries(studentsSnap.val()).forEach(([id, student]) => {
+        users.push({
+          id,
+          uid: student.uid || id,
+          name: student.fullName || student.name || 'Unknown',
+          email: student.email || student.authEmail,
+          role: 'student',
+          batch: student.batch,
+          regulation: student.regulation,
+          regNum: student.registerNumber || student.regNum
+        });
+      });
+    }
+    
+    // Get all batch admins
+    const adminsSnap = await get(ref(rtdb, 'admins'));
+    if (adminsSnap.exists()) {
+      Object.entries(adminsSnap.val()).forEach(([id, admin]) => {
+        if (admin.role === 'batch_admin' || admin.role === 'year_admin') {
+          users.push({
+            id,
+            uid: admin.uid || id,
+            name: admin.fullName || admin.name || 'Unknown',
+            email: admin.email,
+            role: admin.role,
+            batch: admin.batch
+          });
+        }
+      });
+    }
+    
+    // Sort by name
+    users.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+    
+    return users;
+  } catch (error) {
+    console.error('Error fetching messageable users:', error);
+    throw error;
+  }
+}
+
+/**
+ * Initiate a new chat from admin to any user
+ */
+export async function initiateAdminChat({ 
+  recipientId,
+  recipientName,
+  recipientEmail,
+  recipientRole,
+  adminId = 'admin',
+  adminName = 'Admin Support',
+  message 
+}) {
+  try {
+    const chatId = adminId < recipientId ? `${adminId}_${recipientId}` : `${recipientId}_${adminId}`;
+    const messagesRef = ref(rtdb, `chats/${chatId}/messages`);
+    const newMessageRef = push(messagesRef);
+    
+    const messageData = {
+      senderId: adminId,
+      senderName: adminName,
+      senderEmail: 'admin@cgpa.app',
+      senderRole: 'super_admin',
+      receiverId: recipientId,
+      message,
+      timestamp: Date.now(),
+      read: false
+    };
+    
+    await set(newMessageRef, messageData);
+    
+    // Update chat metadata
+    await update(ref(rtdb, `chats/${chatId}`), {
+      lastMessage: message,
+      lastMessageTime: Date.now(),
+      lastSenderId: adminId,
+      participants: { [adminId]: true, [recipientId]: true }
+    });
+    
+    // Update admin's chat list
+    await set(ref(rtdb, `user_chats/${adminId}/${chatId}`), {
+      recipientId: recipientId,
+      recipientName: recipientName,
+      recipientEmail: recipientEmail,
+      recipientRole: recipientRole,
+      lastMessage: message,
+      lastMessageTime: Date.now(),
+      unread: 0
+    });
+    
+    // Update recipient's chat list with unread count
+    const recipientChatRef = ref(rtdb, `user_chats/${recipientId}/${chatId}`);
+    const recipientChatSnap = await get(recipientChatRef);
+    const currentUnread = recipientChatSnap.exists() ? (recipientChatSnap.val().unread || 0) : 0;
+    
+    await set(recipientChatRef, {
+      recipientId: adminId,
+      recipientName: 'Admin Support',
+      lastMessage: message,
+      lastMessageTime: Date.now(),
+      unread: currentUnread + 1
+    });
+    
+    return { 
+      success: true, 
+      chatId, 
+      messageId: newMessageRef.key,
+      chat: {
+        chatId,
+        recipientId,
+        recipientName,
+        recipientEmail,
+        lastMessage: message,
+        lastMessageTime: Date.now(),
+        unread: 0
+      }
+    };
+  } catch (error) {
+    console.error('Error initiating admin chat:', error);
+    throw error;
+  }
+}
